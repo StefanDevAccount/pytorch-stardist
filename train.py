@@ -23,12 +23,10 @@ from src.models.stardist2d import StarDist2D
 from evaluate import evaluate
 
 
-
 def get_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument("--yaml_conf", type=str, help="YAML configuration file.")
     return parser.parse_args()
-
 
 
 def run():
@@ -43,15 +41,15 @@ def run():
 
     with open(args.yaml_conf) as yconf:
         opt = yaml.safe_load(yconf)
-    
-    if len(opt['kernel_size'])==2:
+
+    if len(opt['kernel_size']) == 2:
         Config = Config2D
         StarDist = StarDist2D
     else:
         Config = Config3D
         StarDist = StarDist3D
 
-    conf = Config( **opt )
+    conf = Config(**opt)
 
     # Set random seed
     seed_all(conf.random_seed)
@@ -61,9 +59,9 @@ def run():
 
     # Model instanciation
     model = StarDist(opt)
-    
+
     # Raise a warning if the model's field of view is smaller than the median size of the objects.
-    fov = np.array( [max(r) for r in model._compute_receptive_field()] )
+    fov = np.array([max(r) for r in model._compute_receptive_field()])
     object_median_size = opt.extents
 
     print("Median object size".ljust(25), ":", object_median_size)
@@ -72,14 +70,12 @@ def run():
     if any(object_median_size > fov):
         warnings.warn("WARNING: median object size larger than field of view of the neural network.")
 
-        
-
-        k = input("Median object size larger than field of view of the neural network.\nDo you want to continue? Enter `no` to exit: ")
+        k = input(
+            "Median object size larger than field of view of the neural network.\nDo you want to continue? Enter `no` to exit: ")
         if str(k).strip().lower() not in ['no', 'n']:
             sys.exit()
 
-
-    # Loading data    
+    # Loading data
     rays = None
     if model.opt.is_3d:
         rays = Rays_GoldenSpiral(opt.n_rays, anisotropy=opt.anisotropy)
@@ -87,9 +83,9 @@ def run():
     train_dataloader, val_dataloader = get_train_val_dataloaders(opt, rays)
 
     train_dataloader, val_dataloader = get_train_val_dataloaders(opt, rays)
-    
 
-    total_nb_samples = len( train_dataloader.dataset ) + ( len(val_dataloader.dataset) if val_dataloader is not None else 0 )
+    total_nb_samples = len(train_dataloader.dataset) + (
+        len(val_dataloader.dataset) if val_dataloader is not None else 0)
     nb_samples_train = len(train_dataloader.dataset)
     nb_samples_val = total_nb_samples - nb_samples_train
 
@@ -97,14 +93,14 @@ def run():
     print("Train nb samples: ".ljust(40), nb_samples_train)
     print("Val nb samples: ".ljust(40), nb_samples_val)
 
-    print("Train augmentation".ljust(25), ":",  train_dataloader.dataset.opt.preprocess)
+    print("Train augmentation".ljust(25), ":", train_dataloader.dataset.opt.preprocess)
     print("Val augmentation".ljust(25), ":", val_dataloader.dataset.opt.preprocess)
 
     # Training
     train(model, train_dataloader, val_dataloader)
 
     # Threshold optimization
-    conf.load_epoch="best"
+    conf.load_epoch = "best"
     best_model = StarDist(conf)
 
     X, Y = val_dataloader.dataset.get_all_data()
@@ -121,31 +117,29 @@ def run():
     print("Evaluation on training set")
     X, Y = train_dataloader.dataset.get_all_data()
 
-    Y_pred = [best_model.predict_instance(x, patch_size = patch_size)[0] for x in tqdm(X)]
+    Y_pred = [best_model.predict_instance(x, patch_size=patch_size)[0] for x in tqdm(X)]
     stats, fig = evaluate(Y_pred, Y)
-    plt.savefig( log_dir / "acc_on_train_set.png" )
+    plt.savefig(log_dir / "acc_on_train_set.png")
     plt.close(fig)
-    stats = pd.DataFrame( stats )
+    stats = pd.DataFrame(stats)
     stats.to_csv(log_dir / "perf_on_train_set.csv", index=False)
     print(stats)
-
-
 
     # Evaluation on Validation set
     print("Evaluation on validation set")
 
     X, Y = val_dataloader.dataset.get_all_data()
 
-    Y_pred = [best_model.predict_instance(x, patch_size = patch_size)[0] for x in tqdm(X)]
+    Y_pred = [best_model.predict_instance(x, patch_size=patch_size)[0] for x in tqdm(X)]
     stats, fig = evaluate(Y_pred, Y)
-    plt.savefig( log_dir / "acc_on_val_set.png" )
+    plt.savefig(log_dir / "acc_on_val_set.png")
     plt.close(fig)
-    stats = pd.DataFrame( stats )
+    stats = pd.DataFrame(stats)
     stats.to_csv(log_dir / "perf_on_val_set.csv", index=False)
     print(stats)
 
     print(f"\n\nEvaluation scores saved at <{log_dir.absolute()}>")
 
 
-if __name__=="__main__":
+if __name__ == "__main__":
     run()

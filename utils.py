@@ -13,7 +13,6 @@ from src.data.stardist_dataset import get_train_val_dataloaders
 from src.models.config import ConfigBase
 
 
-
 def seed_all(seed):
     """Utility function to set seed across all pytorch process for repeatable experiment
     """
@@ -28,13 +27,14 @@ def seed_all(seed):
     np.random.seed(seed)
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
-    #torch.backends.cudnn.benchmark = False
+    # torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.benchmark = False
+
 
 def seed_worker(worker_id):
     """Utility function to set random seed for Pytorch DataLoader
     """
-    worker_seed = torch.initial_seed() % 2**32
+    worker_seed = torch.initial_seed() % 2 ** 32
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 
@@ -55,9 +55,7 @@ def makedirs(path):
         os.makedirs(path)
 
 
-
-def prepare_conf(opt:ConfigBase):
-
+def prepare_conf(opt: ConfigBase):
     """
     Add information to the configuration parameters.
     Attribute added/updated:
@@ -76,7 +74,7 @@ def prepare_conf(opt:ConfigBase):
     """
 
     opt.n_channel = opt.n_channel_in
-    opt.is_3d = len(opt.kernel_size)==3
+    opt.is_3d = len(opt.kernel_size) == 3
 
     if not opt.is_3d:
 
@@ -90,8 +88,7 @@ def prepare_conf(opt:ConfigBase):
             value = [1] + value
             opt.__setattr__(attr, value)
 
-
-    if not hasattr(opt, "use_opencl") :
+    if not hasattr(opt, "use_opencl"):
         opt.use_opencl = opt.use_gpu
 
     rays = Rays_GoldenSpiral(opt.n_rays)
@@ -110,54 +107,56 @@ def prepare_conf(opt:ConfigBase):
     images += val_images
     val_masks += val_masks
 
-
     extents = calculate_extents(masks)
     opt.extents = list(extents)
 
-
     if anisotropy == "auto":
         print(" === Computing anisotropy...")
-        anisotropy = tuple( np.max(extents) / extents )
+        anisotropy = tuple(np.max(extents) / extents)
         opt.anisotropy = anisotropy
-    
+
     print(' === Empirical anisotropy of labeled objects = %s' % str(anisotropy))
 
     grid = opt.grid
     if grid == "auto":
-        grid = tuple( np.round( max(anisotropy) / a ).astype(int) for a in anisotropy )  #tuple(1 if a > 1.5 else 2 for a in anisotropy)
+        grid = tuple(np.round(max(anisotropy) / a).astype(int) for a in
+                     anisotropy)  # tuple(1 if a > 1.5 else 2 for a in anisotropy)
         grid = tuple(make_power_of_2(grid))
-        if max(grid)==1:
+        if max(grid) == 1:
             grid = (2,) * len(grid)
         print(" === 'grid' set to", grid)
         opt.grid = grid
-    
+
     opt.resnet_n_downs = opt.grid
 
     print()
 
     return opt
 
+
 def make_power_of_2(arr):
-    return 2 ** np.ceil( np.log2(arr) ).astype(int)
+    return 2 ** np.ceil(np.log2(arr)).astype(int)
 
 
 lbl_cmap = random_label_cmap()
 
+
 def plot_img_label(img, lbl, img_title="image (XY slice)", lbl_title="label (XY slice)", z=None, **kwargs):
     if z is None:
-        z = img.shape[0] // 2    
-    fig, (ai,al) = plt.subplots(1,2, figsize=(12,5), gridspec_kw=dict(width_ratios=(1.25,1)))
-    im = ai.imshow(img[z], cmap='gray', clim=(0,1))
-    ai.set_title(img_title)    
+        z = img.shape[0] // 2
+    fig, (ai, al) = plt.subplots(1, 2, figsize=(12, 5), gridspec_kw=dict(width_ratios=(1.25, 1)))
+    im = ai.imshow(img[z], cmap='gray', clim=(0, 1))
+    ai.set_title(img_title)
     fig.colorbar(im, ax=ai)
     al.imshow(lbl[z], cmap=lbl_cmap)
     al.set_title(lbl_title)
     plt.tight_layout()
 
+
 def plot_img_label2d(img, lbl, img_title="image", lbl_title="label", **kwargs):
-    fig, (ai,al) = plt.subplots(1,2, figsize=(12,5), gridspec_kw=dict(width_ratios=(1.25,1)))
-    im = ai.imshow(img, cmap='gray', clim=(0,1))
-    ai.set_title(img_title)    
+    fig, (ai, al) = plt.subplots(1, 2, figsize=(12, 5), gridspec_kw=dict(width_ratios=(1.25, 1)))
+    im = ai.imshow(img, cmap='gray', clim=(0, 1))
+    ai.set_title(img_title)
     fig.colorbar(im, ax=ai)
     al.imshow(lbl, cmap=lbl_cmap)
     al.set_title(lbl_title)
