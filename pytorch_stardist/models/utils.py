@@ -363,8 +363,8 @@ class Block3D:
 
 def get_files(
         dirpath,
-        extensions=['.jpg', '.JPG', '.jpeg', '.JPEG', '.png', '.PNG', '.ppm', '.PPM', '.bmp', '.BMP', '.tif', '.TIF',
-                    '.tiff', '.TIFF']
+        extensions=('.jpg', '.JPG', '.jpeg', '.JPEG', '.png', '.PNG', '.ppm', '.PPM', '.bmp', '.BMP', '.tif', '.TIF',
+                    '.tiff', '.TIFF')
 ):
     filepaths = []
     assert os.path.isdir(dirpath), '%s is not a valid directory' % dirpath
