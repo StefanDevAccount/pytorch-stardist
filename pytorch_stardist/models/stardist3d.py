@@ -1,10 +1,10 @@
 import numpy as np
 
 
-from stardist_tools.rays3d import rays_from_json
-from stardist_tools.nms import non_maximum_suppression_3d, non_maximum_suppression_3d_sparse
-from stardist_tools.geometry import polyhedron_to_label
-from stardist_tools.matching import relabel_sequential
+from ..rays3d import rays_from_json
+from ..nms import non_maximum_suppression_3d, non_maximum_suppression_3d_sparse
+from ..geometry import polyhedron_to_label
+from ..matching import relabel_sequential
 
 from .utils import Block3D, with_no_grad
 from .stardist_base import StarDistBase

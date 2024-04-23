@@ -10,8 +10,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from stardist_tools.nms import _ind_prob_thresh
-from stardist_tools.utils import _is_power_of_2, optimize_threshold
+from ..nms import _ind_prob_thresh
+from ..utils import _is_power_of_2, optimize_threshold
 from scipy.ndimage import zoom
 
 
@@ -19,7 +19,7 @@ from .networks import define_stardist_net, DistLoss
 from .logger import Logger
 from .utils import with_no_grad, get_scheduler, update_lr, makedirs, _make_grid_divisible, load_json, save_json, makedirs
 
-from stardist_tools.rays3d import Rays_GoldenSpiral, rays_from_json
+from ..rays3d import Rays_GoldenSpiral, rays_from_json
 
 from .config import Config2D, Config3D
 
