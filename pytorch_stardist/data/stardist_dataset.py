@@ -212,7 +212,7 @@ class StarDistDataBase(Dataset):
                     _ind_cache[k] = inds
         if foreground_only and len(inds[0]) == 0:
             # no foreground pixels available
-            return self.get_valid_inds(mask, foreground_prob=0)
+            return self.get_valid_inds(k, mask, patch_size, foreground_prob=0)
         return inds
 
     def channels_as_tuple(self, x):
