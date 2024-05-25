@@ -187,6 +187,17 @@ class Config2D(ConfigBase):
         self.resnet_n_conv_per_block = 3
         self.use_batch_norm = False
 
+        # unet configurations
+
+        self.unet_n_depth = 3
+        self.unet_kernel_size = 3, 3
+        self.unet_n_filter_base = 32
+        self.unet_n_conv_per_depth = 2
+        self.unet_pool = 2, 2
+        self.unet_batch_norm = False
+        self.unet_dropout = 0.0
+        self.net_conv_after_unet = 128
+
         # ======================================================================
 
         # ========================= Optimizers ================================

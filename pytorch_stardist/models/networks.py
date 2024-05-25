@@ -98,25 +98,28 @@ class BaseNetwork(nn.Module):
 
 
 def define_stardist_net(opt):
-    if opt.backbone != "resnet":
+    if opt.backbone not in {"resnet", "unet"}:
         raise NotImplementedError(f"<{opt.backbone}> is not supported. Backbone supported: <resnet>")
 
-    hparams = {
-        "input_nc": opt.n_channel_in,
-        "n_rays": opt.n_rays,
-        "n_classes": opt.n_classes,
-        "n_filter_of_conv_after_resnet": opt.n_filter_of_conv_after_resnet,
-        "n_blocks": opt.resnet_n_blocks,
-        "n_downs": opt.resnet_n_downs,
-        "n_filter_base": opt.resnet_n_filter_base,
-        "n_conv_per_block": opt.resnet_n_conv_per_block,
-        "kernel_size": opt.kernel_size,
-        "batch_norm": opt.use_batch_norm,
-        "activation": nn.ReLU(),
-        "last_conv_bias_if_batch_norm": False
-    }
+    if opt.backbone == "resnet":
+        hparams = {
+            "input_nc": opt.n_channel_in,
+            "n_rays": opt.n_rays,
+            "n_classes": opt.n_classes,
+            "n_filter_of_conv_after_resnet": opt.n_filter_of_conv_after_resnet,
+            "n_blocks": opt.resnet_n_blocks,
+            "n_downs": opt.resnet_n_downs,
+            "n_filter_base": opt.resnet_n_filter_base,
+            "n_conv_per_block": opt.resnet_n_conv_per_block,
+            "kernel_size": opt.kernel_size,
+            "batch_norm": opt.use_batch_norm,
+            "activation": nn.ReLU(),
+            "last_conv_bias_if_batch_norm": False
+        }
 
-    net = StarDistResnet(**hparams)
+        net = StarDistResnet(**hparams)
+    elif opt.backbone == "unet":
+        net = StarDistUnet(config=opt)
 
     gpu_ids = [0] if opt.use_gpu else []
     net.init_net(init_type=opt.init_type, init_gain=opt.init_gain, gpu_ids=gpu_ids)
@@ -368,6 +371,264 @@ class ResnetBlock(nn.Module):
     def forward(self, x):
         out = self.conv_block(x) + self.residual_block(x)
         return out
+
+
+
+######################################################################
+#                              UNet
+######################################################################
+
+
+def conv_block2(out_channels, n1, n2, activation=nn.ReLU, padding='same', dropout=0.0, batch_norm=False, in_channels=3):
+    """
+    Create a 2D convolution layer.
+
+    Parameters
+    ----------
+    out_channels: int
+        number of output channels
+    n1: int
+        kernel size x direction
+    n2: int
+        kernel size y direction
+    activation: nn.Module | Callable
+        activation function
+    padding: str
+        padding option
+    dropout: float
+        dropout probability
+    batch_norm: bool
+        if True uses Batch norm
+    in_channels: int
+        number of input channels
+
+    Returns
+    -------
+    Sequential
+        Returns a :class:`nn.Sequential` object containing the layers for the 2D convolution
+    """
+    layers = [nn.Conv2d(in_channels, out_channels, (n1, n2), padding=padding)]
+    if batch_norm:
+        layers.append(nn.BatchNorm2d(out_channels))
+    layers.append(activation())
+    if dropout > 0:
+        layers.append(nn.Dropout(dropout))
+    return nn.Sequential(*layers)
+
+
+def conv_block3(out_channels, n1, n2, n3, activation=nn.ReLU, padding='same', dropout=0.0, batch_norm=False, in_channels=3):
+    """
+    Create a 3D convolution layer.
+
+    Parameters
+    ----------
+    out_channels: int
+        number of output channels
+    n1: int
+        kernel size x direction
+    n2: int
+        kernel size y direction
+    n3: int
+        kernel size z direction
+    activation: nn.Module
+        activation function
+    padding: str
+        padding option
+    dropout: float
+        dropout probability
+    batch_norm: bool
+        if True uses Batch norm
+    in_channels: int
+        number of input channels
+
+    Returns
+    -------
+    Sequential
+        Returns a :class:`nn.Sequential` object containing the layers for the 3D convolution
+    """
+    layers = [nn.Conv3d(in_channels, out_channels, (n1, n2, n3), padding=padding)]
+    if batch_norm:
+        layers.append(nn.BatchNorm3d(out_channels))
+    layers.append(activation())
+    if dropout > 0:
+        layers.append(nn.Dropout(dropout))
+    return nn.Sequential(*layers)
+
+
+class UNetBlock(nn.Module):
+    def __init__(self, in_channels, n_depth=2, n_filter_base=16, kernel_size=(3, 3), n_conv_per_depth=2,
+                 activation=nn.ReLU, batch_norm=False, dropout=0.0, last_activation=None, pool=(2, 2),
+                 expansion=2):
+        super().__init__()
+        if len(pool) != len(kernel_size):
+            raise ValueError('kernel and pool sizes must match.')
+
+        dim = len(kernel_size)
+        if dim not in (2, 3):
+            raise ValueError('unet_block only 2d or 3d.')
+
+        self.n_depth = n_depth
+
+        conv_block = conv_block2 if dim == 2 else conv_block3
+        self.pooling = nn.MaxPool2d(pool) if dim == 2 else nn.MaxPool3d(pool)
+        self.upsampling = nn.Upsample(scale_factor=pool, mode='nearest')
+
+        self.down_convs = nn.ModuleList()
+        self.up_convs = nn.ModuleList()
+        self.middle_convs = nn.ModuleList()
+
+        if last_activation is None:
+            last_activation = activation
+
+        # down...
+        for n in range(n_depth):
+            down_convs_n = []
+            for i in range(n_conv_per_depth):
+                layer = conv_block(int(n_filter_base * expansion ** n), *kernel_size,
+                                   dropout=dropout,
+                                   activation=activation,
+                                   batch_norm=batch_norm,
+                                   in_channels=in_channels)
+                down_convs_n.append(layer)
+                in_channels = int(n_filter_base * expansion ** n)
+
+            self.down_convs.append(nn.Sequential(*down_convs_n))
+
+        # middle
+        for i in range(n_conv_per_depth - 1):
+            layer = conv_block(int(n_filter_base * expansion ** n_depth), *kernel_size,
+                               dropout=dropout,
+                               activation=activation,
+                               batch_norm=batch_norm,
+                               in_channels=in_channels)
+            in_channels = int(n_filter_base * expansion ** n_depth)
+            self.middle_convs.append(layer)
+
+        self.middle_convs.append(
+            conv_block(int(n_filter_base * expansion ** max(0, n_depth - 1)), *kernel_size,
+                       dropout=dropout,
+                       activation=activation,
+                       batch_norm=batch_norm,
+                       in_channels=in_channels)
+        )
+        in_channels = int(n_filter_base * expansion ** max(0, n_depth - 1))
+
+        # ...and up with skip layers
+        for n in reversed(range(n_depth)):
+            up_convs_n = []
+            # add skip layer channel num to total in_channels
+            in_channels += int(n_filter_base * expansion ** n)
+            for i in range(n_conv_per_depth - 1):
+                layer = conv_block(int(n_filter_base * expansion ** n), *kernel_size,
+                                   dropout=dropout,
+                                   activation=activation,
+                                   batch_norm=batch_norm,
+                                   in_channels=in_channels)
+                up_convs_n.append(layer)
+                in_channels = int(n_filter_base * expansion ** n)
+
+            self.up_convs.append(
+                nn.Sequential(*up_convs_n,
+                              conv_block(int(n_filter_base * expansion ** max(0, n - 1)), *kernel_size,
+                                         dropout=dropout,
+                                         activation=activation if n > 0 else last_activation,
+                                         batch_norm=batch_norm,
+                                         in_channels=in_channels)
+                              )
+            )
+            in_channels = int(n_filter_base * expansion ** max(0, n - 1))
+
+    def forward(self, x):
+        skip_layers = []
+
+        for down_conv in self.down_convs:
+            x = down_conv(x)
+            skip_layers.append(x)
+            x = self.pooling(x)
+
+        for middle_conv in self.middle_convs:
+            x = middle_conv(x)
+
+        for n in reversed(range(self.n_depth)):
+            x = torch.cat([self.upsampling(x), skip_layers[n]], dim=1)
+            x = self.up_convs[-n-1](x)
+
+        return x
+
+
+class StarDistUnet(BaseNetwork):
+
+    def __init__(self, config: "ConfigBase"):
+        super().__init__()
+        self.config = config
+        unet_kwargs = {k[len('unet_'):]: v for (k, v) in vars(self.config).items() if k.startswith('unet_')}
+
+        pooled = np.array([1, 1])
+        grid_downsampling_layers = []
+        in_channels = self.config.n_channel_in
+
+        while tuple(pooled) != tuple(self.config.grid):
+            pool = 1 + (np.asarray(self.config.grid) > pooled)
+            pooled *= pool
+            for _ in range(self.config.unet_n_conv_per_depth):
+                conv_layer = nn.Conv2d(in_channels, self.config.unet_n_filter_base, self.config.unet_kernel_size,
+                                       padding='same')
+                activation = nn.ReLU()
+
+                grid_downsampling_layers.append(conv_layer)
+                grid_downsampling_layers.append(activation)
+                in_channels = self.config.unet_n_filter_base  # change in_channels after the first convolution
+
+            max_pool = nn.MaxPool2d(tuple(pool))
+            grid_downsampling_layers.append(max_pool)
+
+        self.grid_downsampling = nn.Sequential(*grid_downsampling_layers)
+
+        self.unet_base = UNetBlock(in_channels=in_channels, **unet_kwargs)
+
+        if self.config.net_conv_after_unet > 0:
+            self.final_layer = nn.Sequential(
+                nn.Conv2d(self.config.unet_n_filter_base, self.config.net_conv_after_unet,
+                          self.config.unet_kernel_size, padding="same"),
+                nn.ReLU()
+            )
+            final_layer_channels = self.config.net_conv_after_unet
+        else:
+            self.final_layer = Identity()
+            final_layer_channels = self.config.unet_n_filter_base
+
+        self.output_prob = nn.Conv2d(final_layer_channels, 1, (1, 1),
+                                     padding="same")
+        self.output_dist = nn.Conv2d(final_layer_channels, self.config.n_rays, (1, 1),
+                                     padding="same")
+
+        if self.config.n_classes is not None:
+            self.output_prob_classes = nn.Sequential(
+                nn.Conv2d(final_layer_channels, self.config.n_classes + 1, (1, 1), padding="same"),
+                nn.Softmax()
+            )
+
+    def forward(self, x):
+        x = self.grid_downsampling(x)
+        x = self.unet_base(x)
+        x = self.final_layer(x)
+
+        if self.config.n_classes is not None:
+            output_classes = self.output_prob_classes(x)
+        else:
+            output_classes = None
+
+        return self.output_dist(x), self.output_prob(x), output_classes
+
+    @staticmethod
+    def define_network(config: "ConfigBase") -> "StarDistUnet":
+        net = StarDistUnet(config)
+        gpu_ids = [0] if config.use_gpu else []
+        net.init_net(init_type=config.init_type, init_gain=config.init_gain, gpu_ids=gpu_ids)
+        net.print_network()
+        # net.hparams = hparams
+
+        return net
 
 
 ######################################################################
