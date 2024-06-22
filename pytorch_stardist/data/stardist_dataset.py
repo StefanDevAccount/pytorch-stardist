@@ -82,8 +82,8 @@ def get_train_val_dataloaders(opt, rays=None, train_augmenter=None):
         assert data_dir_images.exists(), data_dir_images
         assert data_dir_masks.exists(), data_dir_masks
 
-        image_paths = get_files(data_dir_images)
-        mask_paths = get_files(data_dir_masks)
+        image_paths = sorted(get_files(data_dir_images))
+        mask_paths = sorted(get_files(data_dir_masks))
 
         assert len(image_paths) > 0, (len(image_paths), data_dir_images)
         assert len(mask_paths) > 0, (len(mask_paths), data_dir_masks)
