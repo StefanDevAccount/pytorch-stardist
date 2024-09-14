@@ -620,6 +620,13 @@ class StarDistUnet(BaseNetwork):
 
         return self.output_dist(x), self.output_prob(x), output_classes
 
+    def predict(self, x):
+        rays, prob, class_prob = self.forward(x)
+        prob = torch.sigmoid(prob)
+        if class_prob is not None:
+            class_prob = torch.nn.functional.softmax(class_prob, dim=-(1 + self.n_dim))
+        return rays, prob, class_prob
+
     @staticmethod
     def define_network(config: "ConfigBase") -> "StarDistUnet":
         net = StarDistUnet(config)
