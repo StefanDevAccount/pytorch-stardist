@@ -456,6 +456,10 @@ def conv_block3(out_channels, n1, n2, n3, activation=nn.ReLU, padding='same', dr
 
 
 class UNetBlock(nn.Module):
+    """
+    UNet Block transcript from the TensorFlow StarDist implementation.
+    Added ResNet skip layers as shown in https://medium.com/@nishanksingla/unet-with-resblock-for-semantic-segmentation-dd1766b4ff66.
+    """
     def __init__(self, in_channels, n_depth=2, n_filter_base=16, kernel_size=(3, 3), n_conv_per_depth=2,
                  activation=nn.ReLU, batch_norm=False, dropout=0.0, last_activation=None, pool=(2, 2),
                  expansion=2):
@@ -470,12 +474,17 @@ class UNetBlock(nn.Module):
         self.n_depth = n_depth
 
         conv_block = conv_block2 if dim == 2 else conv_block3
-        self.pooling = nn.MaxPool2d(pool) if dim == 2 else nn.MaxPool3d(pool)
-        self.upsampling = nn.Upsample(scale_factor=pool, mode='nearest')
+        conv_class = nn.Conv2d if dim == 2 else nn.Conv3d
+        self.pooling = nn.AvgPool2d(pool) if dim == 2 else nn.AvgPool3d(pool)
+        # self.upsampling = nn.Upsample(scale_factor=pool, mode='nearest')
 
         self.down_convs = nn.ModuleList()
         self.up_convs = nn.ModuleList()
         self.middle_convs = nn.ModuleList()
+
+        self.down_res_skips = nn.ModuleList()
+        self.up_res_skips = nn.ModuleList()
+        self.res_skip_activation = activation()
 
         if last_activation is None:
             last_activation = activation
@@ -483,6 +492,10 @@ class UNetBlock(nn.Module):
         # down...
         for n in range(n_depth):
             down_convs_n = []
+            self.down_res_skips.append(
+                conv_class(in_channels, int(n_filter_base * expansion ** n), 1,
+                           padding="same", bias=False)
+            )
             for i in range(n_conv_per_depth):
                 layer = conv_block(int(n_filter_base * expansion ** n), *kernel_size,
                                    dropout=dropout,
@@ -495,6 +508,8 @@ class UNetBlock(nn.Module):
             self.down_convs.append(nn.Sequential(*down_convs_n))
 
         # middle
+        self.middle_res_skip = conv_class(in_channels, int(n_filter_base * expansion ** max(0, n_depth - 1)), 1,
+                                          padding="same", bias=False)
         for i in range(n_conv_per_depth - 1):
             layer = conv_block(int(n_filter_base * expansion ** n_depth), *kernel_size,
                                dropout=dropout,
@@ -518,6 +533,10 @@ class UNetBlock(nn.Module):
             up_convs_n = []
             # add skip layer channel num to total in_channels
             in_channels += int(n_filter_base * expansion ** n)
+            self.up_res_skips.append(
+                conv_class(in_channels, int(n_filter_base * expansion ** max(0, n - 1)), 1,
+                           padding="same", bias=False)
+            )
             for i in range(n_conv_per_depth - 1):
                 layer = conv_block(int(n_filter_base * expansion ** n), *kernel_size,
                                    dropout=dropout,
@@ -541,17 +560,27 @@ class UNetBlock(nn.Module):
     def forward(self, x):
         skip_layers = []
 
-        for down_conv in self.down_convs:
+        for down_conv, down_res_skip in zip(self.down_convs, self.down_res_skips):
+            res_skip = down_res_skip(x)
             x = down_conv(x)
+            x = self.res_skip_activation(x + res_skip)
             skip_layers.append(x)
             x = self.pooling(x)
 
+        res_skip = self.middle_res_skip(x)
         for middle_conv in self.middle_convs:
             x = middle_conv(x)
+        x = self.res_skip_activation(x + res_skip)
 
         for n in reversed(range(self.n_depth)):
-            x = torch.cat([self.upsampling(x), skip_layers[n]], dim=1)
+            # use interpolate with size parameter to make processing images that are not of shape 2^k x 2^k possible
+            x = torch.cat(
+                [torch.nn.functional.interpolate(x, size=skip_layers[n].shape[-2:], mode="nearest-exact"),
+                 skip_layers[n]],
+                dim=1)
+            res_skip = self.up_res_skips[-n - 1](x)
             x = self.up_convs[-n-1](x)
+            x = self.res_skip_activation(x + res_skip)
 
         return x
 
