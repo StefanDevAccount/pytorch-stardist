@@ -460,6 +460,7 @@ class UNetBlock(nn.Module):
     UNet Block transcript from the TensorFlow StarDist implementation.
     Added ResNet skip layers as shown in https://medium.com/@nishanksingla/unet-with-resblock-for-semantic-segmentation-dd1766b4ff66.
     """
+
     def __init__(self, in_channels, n_depth=2, n_filter_base=16, kernel_size=(3, 3), n_conv_per_depth=2,
                  activation=nn.ReLU, batch_norm=False, dropout=0.0, last_activation=None, pool=(2, 2),
                  expansion=2):
@@ -557,6 +558,8 @@ class UNetBlock(nn.Module):
             )
             in_channels = int(n_filter_base * expansion ** max(0, n - 1))
 
+        self.dim = dim
+
     def forward(self, x):
         skip_layers = []
 
@@ -575,11 +578,11 @@ class UNetBlock(nn.Module):
         for n in reversed(range(self.n_depth)):
             # use interpolate with size parameter to make processing images that are not of shape 2^k x 2^k possible
             x = torch.cat(
-                [torch.nn.functional.interpolate(x, size=skip_layers[n].shape[-2:], mode="nearest-exact"),
+                [torch.nn.functional.interpolate(x, size=skip_layers[n].shape[-self.dim:], mode="nearest-exact"),
                  skip_layers[n]],
                 dim=1)
             res_skip = self.up_res_skips[-n - 1](x)
-            x = self.up_convs[-n-1](x)
+            x = self.up_convs[-n - 1](x)
             x = self.res_skip_activation(x + res_skip)
 
         return x
@@ -592,23 +595,26 @@ class StarDistUnet(BaseNetwork):
         self.config = config
         unet_kwargs = {k[len('unet_'):]: v for (k, v) in vars(self.config).items() if k.startswith('unet_')}
 
-        pooled = np.array([1, 1])
+        pooled = np.ones(len(unet_kwargs["pool"]), dtype=np.int32)
         grid_downsampling_layers = []
         in_channels = self.config.n_channel_in
+
+        dim = len(unet_kwargs["kernel_size"])
+        self.conv_class = nn.Conv2d if dim == 2 else nn.Conv3d
 
         while tuple(pooled) != tuple(self.config.grid):
             pool = 1 + (np.asarray(self.config.grid) > pooled)
             pooled *= pool
             for _ in range(self.config.unet_n_conv_per_depth):
-                conv_layer = nn.Conv2d(in_channels, self.config.unet_n_filter_base, self.config.unet_kernel_size,
-                                       padding='same')
+                conv_layer = self.conv_class(in_channels, self.config.unet_n_filter_base, self.config.unet_kernel_size,
+                                             padding='same')
                 activation = nn.ReLU()
 
                 grid_downsampling_layers.append(conv_layer)
                 grid_downsampling_layers.append(activation)
                 in_channels = self.config.unet_n_filter_base  # change in_channels after the first convolution
 
-            max_pool = nn.MaxPool2d(tuple(pool))
+            max_pool = nn.MaxPool2d(tuple(pool)) if dim == 2 else nn.MaxPool3d(tuple(pool))
             grid_downsampling_layers.append(max_pool)
 
         self.grid_downsampling = nn.Sequential(*grid_downsampling_layers)
@@ -617,23 +623,23 @@ class StarDistUnet(BaseNetwork):
 
         if self.config.net_conv_after_unet > 0:
             self.final_layer = nn.Sequential(
-                nn.Conv2d(self.config.unet_n_filter_base, self.config.net_conv_after_unet,
-                          self.config.unet_kernel_size, padding="same"),
+                self.conv_class(self.config.unet_n_filter_base, self.config.net_conv_after_unet,
+                                self.config.unet_kernel_size, padding="same"),
                 nn.ReLU()
             )
-            final_layer_channels = self.config.net_conv_after_unet
+            self.final_layer_channels = self.config.net_conv_after_unet
         else:
             self.final_layer = Identity()
-            final_layer_channels = self.config.unet_n_filter_base
+            self.final_layer_channels = self.config.unet_n_filter_base
 
-        self.output_prob = nn.Conv2d(final_layer_channels, 1, (1, 1),
-                                     padding="same")
-        self.output_dist = nn.Conv2d(final_layer_channels, self.config.n_rays, (1, 1),
-                                     padding="same")
+        self.output_prob = self.conv_class(self.final_layer_channels, 1, 1,
+                                           padding="same")
+        self.output_dist = self.conv_class(self.final_layer_channels, self.config.n_rays, 1,
+                                           padding="same")
 
         if self.config.n_classes is not None:
             self.output_prob_classes = nn.Sequential(
-                nn.Conv2d(final_layer_channels, self.config.n_classes + 1, (1, 1), padding="same"),
+                self.conv_class(self.final_layer_channels, self.config.n_classes + 1, 1, padding="same"),
                 nn.Softmax()
             )
 
