@@ -1,6 +1,6 @@
 import numpy as np
 
-from .base import StarDistDataBase, StarDistBase
+from .base import StarDistDataBase, StarDistBase, ConfigBase
 
 from ..rays3d import rays_from_json
 from ..nms import non_maximum_suppression_3d, non_maximum_suppression_3d_sparse
